@@ -1,18 +1,7 @@
-{- 
-
-pong - a very simple FunGEn example.
-http://www.cin.ufpe.br/~haskell/fungen
-Copyright (C) 2001  Andre Furtado <awbf@cin.ufpe.br>
-
-This code is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
--}
-
 module Main where
     import Graphics.UI.Fungen
     import Graphics.Rendering.OpenGL (GLdouble)
+    import Control.concurrent
     
     data GameState = Stage Int
     data GameAttribute = Score Int Int
@@ -23,6 +12,8 @@ module Main where
     type BreakoutAction a = IOGame GameAttribute () GameState TileAttribute a
     type BreakoutTile = Tile TileAttribute
     type BreakoutMap = TileMatrix TileAttribute
+
+    waitInMicros = 4 * 10^6
 
     rows = 6
     columns = 6
@@ -323,3 +314,25 @@ module Main where
 
     map1 :: BreakoutMap
     map1 = [[f]]
+
+    --Threading
+    allowBallLoop :: MVar Int -> Int -> IO ()
+    allowBallLoop ballValue max = do
+      value <- readMVar ballValue
+      if (value == max) then return ()
+      else (do
+        threadDelay waitInMicros
+        value <- takeMVar ballValue
+        putMVar ballValue (value + 1)
+        allowBallLoop ballValue max
+        )
+    
+    tryWakingBall :: MVar Int -> BreakoutAction ()
+    tryWakingBall ballValue = do
+      value <- readMVar ballValue
+      ball <- findObject ("ball" ++ (show value)) "ballGroup"
+      asleep <- getObjectAsleep ball
+      when (asleep) (do
+        setObjectAsleep False ball
+        )
+    --Fim de Threading
