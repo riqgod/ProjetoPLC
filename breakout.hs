@@ -1,7 +1,7 @@
 module Main where
     import Graphics.UI.Fungen
     import Graphics.Rendering.OpenGL (GLdouble)
-    import Control.concurrent
+    import Control.Concurrent
     
     data GameState = Stage Int
     data GameAttribute = Score Int Int
@@ -13,7 +13,9 @@ module Main where
     type BreakoutTile = Tile TileAttribute
     type BreakoutMap = TileMatrix TileAttribute
 
+    firstWait = 10 * 10^6
     waitInMicros = 4 * 10^6
+    liog = liftIOtoIOGame
 
     rows = 6
     columns = 6
@@ -62,7 +64,14 @@ module Main where
             ,(SpecialKey KeyLeft,  StillDown, moveBarToLeft)
             ,(Char 'q',            Press,     \_ _ -> funExit)
             ]
-      funInit winConfig gameMap [bar,ball,blocks,obstacle] (Stage 0) initAttributes input gameCycle (Timer 16) bmpList
+      ballValue <- newEmptyMVar
+      putMVar ballValue 1
+      increment <- newEmptyMVar
+      putMVar increment False
+      maximum <- newEmptyMVar
+      putMVar maximum 2
+      forkIO $ allowBallLoop ballValue increment maximum
+      funInit winConfig gameMap [bar,ball,blocks,obstacle] (Stage 0) initAttributes input (gameCycle ballValue increment maximum) (Timer 16) bmpList
     
     createBlocks :: Int -> Int -> [Blocks]
     createBlocks row column
@@ -128,8 +137,8 @@ module Main where
     createBall :: [GameObject ()]
     createBall =
       let ballPic = Tex (tileSize,tileSize) ball
-      in [(object "ball1" ballPic False (400,450) (5,5) ()),
-          (object "ball2" ballPic False (400,450) (5,5) ()),
+      in [(object "ball1" ballPic True (400,450) (5,5) ()),
+          (object "ball2" ballPic True (400,450) (5,5) ()),
           (object "ball3" ballPic True (400,450) (5*1.25,5*1.25) ())]
 
     createBar :: GameObject ()
@@ -254,21 +263,28 @@ module Main where
                          setObjectPosition (450,400) ball3
                          obstacle <- findObject "obstacle" "obstacleGroup"
                          setObjectAsleep True obstacle
-                         setObjectAsleep True ball3
                          (speedX,speedY) <- getObjectSpeed ball1
                          setObjectSpeed (5,5) ball1
-                         setObjectSpeed (5,5) ball2)
+                         setObjectSpeed (5,5) ball2
+                         setObjectAsleep True ball1
+                         setObjectAsleep True ball2
+                         setObjectAsleep True ball3)
                    2 -> (do 
                          spawnDesiredBlocks flags 5 0 (-columns)
                          setFlags flags
                          setGameAttribute(Score y 60)
                          ball1 <- findObject "ball1" "ballGroup"
                          ball2 <- findObject "ball2" "ballGroup"
+                         ball3 <- findObject "ball3" "ballGroup"
                          setObjectPosition (450,400) ball1
                          setObjectPosition (450,400) ball2
+                         setObjectPosition (450,400) ball3
                          (speedX,speedY) <- getObjectSpeed ball1
                          setObjectSpeed (speedX*1.25,speedY*1.25) ball1
-                         setObjectSpeed (speedX*1.25,speedY*1.25) ball2)
+                         setObjectSpeed (speedX*1.25,speedY*1.25) ball2
+                         setObjectAsleep True ball1
+                         setObjectAsleep True ball2
+                         setObjectAsleep True ball3)
                    3 -> (do
                          obstacle <- findObject "obstacle" "obstacleGroup"
                          ball3 <- findObject "ball3" "ballGroup"
@@ -276,15 +292,19 @@ module Main where
                          ball1 <- findObject "ball1" "ballGroup"
                          setObjectPosition (450,400) ball1
                          setObjectPosition (450,400) ball2
+                         setObjectPosition (450,400) ball3
                          setObjectAsleep False ball3
                          spawnDesiredBlocks flags 6 0 (-columns)
                          setFlags flags
                          setGameAttribute(Score y 72)
-                         setObjectAsleep False obstacle)
+                         setObjectAsleep False obstacle
+                         setObjectAsleep True ball1
+                         setObjectAsleep True ball2
+                         setObjectAsleep True ball3)
                    _ -> return ()    
 
-    gameCycle :: BreakoutAction ()
-    gameCycle = do
+    gameCycle :: MVar Int -> MVar Bool -> MVar Int-> BreakoutAction ()
+    gameCycle ballValue increment maximum = do
       (Score n blocks) <- getGameAttribute
       balls <- getObjectsFromGroup "ballGroup"
       checkBalls balls
@@ -294,16 +314,30 @@ module Main where
                           Stage n -> case n of 
                                   0 -> (do
                                        setGameState (Stage 1)
+                                       tempVal2 <- liog $ (takeMVar maximum)
+                                       liog $ putMVar maximum 2
+                                       tempVal <- liog $ (takeMVar ballValue)
+                                       liog $ putMVar ballValue 1
                                        switchLevel 1)
                                   1 -> (do
                                         setGameState (Stage 2)
+                                        tempVal2 <- liog $ (takeMVar maximum)
+                                        liog $ putMVar maximum 2
+                                        tempVal <- liog $ (takeMVar ballValue)
+                                        liog $ putMVar ballValue 1
                                         liftIOtoIOGame(putStrLn("LEVEL1"))  
                                         switchLevel 2)
                                   2 -> (do
                                         setGameState (Stage 3)
+                                        tempVal2 <- liog $ (takeMVar maximum)
+                                        liog $ putMVar maximum 3
+                                        tempVal <- liog $ (takeMVar ballValue)
+                                        liog $ putMVar ballValue 1
                                         switchLevel 3)
                                   3 -> funExit)         
 
+      tryWakingBall ballValue
+      liog $ (modifyMVar_ increment (\x -> return(True)))
       printOnScreen (("Score: ") ++ show n) TimesRoman24 (620,800) 1.0 1.0 1.0
       printOnScreen (("Blocks Left: ") ++ show blocks) TimesRoman24 (0,28) 1.0 1.0 1.0
       showFPS TimesRoman24 (w-40,0) 0.0 0.0 1.0
@@ -316,23 +350,26 @@ module Main where
     map1 = [[f]]
 
     --Threading
-    allowBallLoop :: MVar Int -> Int -> IO ()
-    allowBallLoop ballValue max = do
+    allowBallLoop :: MVar Int -> MVar Bool -> MVar Int -> IO ()
+    allowBallLoop ballValue increment maximum = do
       value <- readMVar ballValue
-      if (value == max) then return ()
+      inc <- readMVar increment
+      max <- readMVar maximum
+      threadDelay waitInMicros
+      if (value == max || inc == False) then return ()
       else (do
-        threadDelay waitInMicros
         value <- takeMVar ballValue
         putMVar ballValue (value + 1)
-        allowBallLoop ballValue max
         )
+      allowBallLoop ballValue increment maximum 
     
     tryWakingBall :: MVar Int -> BreakoutAction ()
     tryWakingBall ballValue = do
-      value <- readMVar ballValue
+      value <- liog (readMVar ballValue)
       ball <- findObject ("ball" ++ (show value)) "ballGroup"
       asleep <- getObjectAsleep ball
       when (asleep) (do
+        liog $ print ((show value) ++ " acordando")
         setObjectAsleep False ball
         )
     --Fim de Threading
