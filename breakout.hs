@@ -70,8 +70,10 @@ module Main where
       putMVar increment False
       maximum <- newEmptyMVar
       putMVar maximum 2
+      shouldWake <- newEmptyMVar
+      putMVar shouldWake False
       forkIO $ allowBallLoop ballValue increment maximum
-      funInit winConfig gameMap [bar,ball,blocks,obstacle] (Stage 0) initAttributes input (gameCycle ballValue increment maximum) (Timer 16) bmpList
+      funInit winConfig gameMap [bar,ball,blocks,obstacle] (Stage 0) initAttributes input (gameCycle ballValue increment maximum shouldWake) (Timer 16) bmpList
     
     createBlocks :: Int -> Int -> [Blocks]
     createBlocks row column
@@ -303,12 +305,18 @@ module Main where
                          setObjectAsleep True ball3)
                    _ -> return ()    
 
-    gameCycle :: MVar Int -> MVar Bool -> MVar Int-> BreakoutAction ()
-    gameCycle ballValue increment maximum = do
+    gameCycle :: MVar Int -> MVar Bool -> MVar Int -> MVar Bool -> BreakoutAction ()
+    gameCycle ballValue increment maximum shouldWake = do
       (Score n blocks) <- getGameAttribute
       balls <- getObjectsFromGroup "ballGroup"
       checkBalls balls
       state <- getGameState
+      obstacle <- findObject "obstacle" "obstacleGroup"
+      wake <- getObjectAsleep obstacle
+      when(not wake)(do
+        liog $ modifyMVar_ shouldWake (\x -> return (False))
+        )
+        
       when(blocks <= 0)(do
                         case state of
                           Stage n -> case n of 
@@ -333,10 +341,12 @@ module Main where
                                         liog $ putMVar maximum 3
                                         tempVal <- liog $ (takeMVar ballValue)
                                         liog $ putMVar ballValue 1
+                                        liog $ forkIO (allowObstacleDelayed shouldWake)
                                         switchLevel 3)
                                   3 -> funExit)         
 
       tryWakingBall ballValue
+      tryWakingObstacle shouldWake
       liog $ (modifyMVar_ increment (\x -> return(True)))
       printOnScreen (("Score: ") ++ show n) TimesRoman24 (620,800) 1.0 1.0 1.0
       printOnScreen (("Blocks Left: ") ++ show blocks) TimesRoman24 (0,28) 1.0 1.0 1.0
@@ -372,4 +382,17 @@ module Main where
         liog $ print ((show value) ++ " acordando")
         setObjectAsleep False ball
         )
+
+    tryWakingObstacle :: MVar Bool -> BreakoutAction ()
+    tryWakingObstacle shouldWake = do
+      sw <- liog $ readMVar shouldWake
+      when (sw) (do
+        obstacle <- findObject "obstacle" "obstacleGroup"
+        setObjectAsleep False obstacle
+        )
+
+    allowObstacleDelayed :: MVar Bool -> IO ()
+    allowObstacleDelayed shouldWake = do
+      threadDelay waitInMicros
+      modifyMVar_ shouldWake (\x -> return (True))
     --Fim de Threading
