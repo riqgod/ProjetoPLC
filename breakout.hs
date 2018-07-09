@@ -205,9 +205,9 @@ module Main where
             reverseXSpeed ball
             setGameAttribute (Score (n+10) (blocks-1)))       
         
-    checkBalls :: [Ball] -> BreakoutAction ()
-    checkBalls [] = return()
-    checkBalls (x:xs) = do
+    checkBalls :: MVar Int -> MVar Int -> MVar Bool -> [Ball] -> BreakoutAction ()
+    checkBalls _ _ _ [] = return()
+    checkBalls ballValue maximum shouldWake (x:xs) = do
       obstacle <- findObject "obstacle" "obstacleGroup"
       (Score n blocks) <- getGameAttribute
       flags <- getObjectsFromGroup "blockGroup"
@@ -223,6 +223,10 @@ module Main where
         if( (n-100) < 0 )
           then (do
                 setGameState (Stage 1)
+                tempVal2 <- liog $ (takeMVar maximum)
+                liog $ putMVar maximum 2
+                tempVal <- liog $ (takeMVar ballValue)
+                liog $ putMVar ballValue 1
                 switchLevel 1)
           else(do 
                setGameAttribute (Score (n-100) blocks) 
@@ -240,7 +244,7 @@ module Main where
       col8 <- objectRightMapCollision obstacle
       when(col7 || col8) (do reverseXSpeed obstacle)
 
-      checkBalls xs
+      checkBalls ballValue maximum shouldWake xs
       
 
 
@@ -282,6 +286,8 @@ module Main where
                          setObjectPosition (450,400) ball2
                          setObjectPosition (450,400) ball3
                          (speedX,speedY) <- getObjectSpeed ball1
+                         obstacle <- findObject "obstacle" "obstacleGroup"
+                         setObjectAsleep True obstacle
                          setObjectSpeed (speedX*1.25,speedY*1.25) ball1
                          setObjectSpeed (speedX*1.25,speedY*1.25) ball2
                          setObjectAsleep True ball1
@@ -296,10 +302,11 @@ module Main where
                          setObjectPosition (450,400) ball2
                          setObjectPosition (450,400) ball3
                          setObjectAsleep False ball3
+                         obstacle <- findObject "obstacle" "obstacleGroup"
+                         setObjectAsleep True obstacle
                          spawnDesiredBlocks flags 6 0 (-columns)
                          setFlags flags
                          setGameAttribute(Score y 72)
-                         setObjectAsleep False obstacle
                          setObjectAsleep True ball1
                          setObjectAsleep True ball2
                          setObjectAsleep True ball3)
@@ -309,7 +316,7 @@ module Main where
     gameCycle ballValue increment maximum shouldWake = do
       (Score n blocks) <- getGameAttribute
       balls <- getObjectsFromGroup "ballGroup"
-      checkBalls balls
+      checkBalls ballValue maximum shouldWake balls
       state <- getGameState
       obstacle <- findObject "obstacle" "obstacleGroup"
       wake <- getObjectAsleep obstacle
@@ -330,7 +337,7 @@ module Main where
                                   1 -> (do
                                         setGameState (Stage 2)
                                         tempVal2 <- liog $ (takeMVar maximum)
-                                        liog $ putMVar maximum 2
+                                        liog $ putMVar maximum 3
                                         tempVal <- liog $ (takeMVar ballValue)
                                         liog $ putMVar ballValue 1
                                         liftIOtoIOGame(putStrLn("LEVEL1"))  
