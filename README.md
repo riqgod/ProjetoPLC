@@ -4,4 +4,4 @@ logins:
 ham2 gbgv gacm
 
 
-Para rodar o pc deve ter o ghci instalado e o cabal ``install FunGEn``
+Para rodar o pc deve ter o ghci instalado e o `` cabal install FunGEn``
